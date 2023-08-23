@@ -21,8 +21,8 @@ import (
 	"time"
 )
 
-func AndroidAPK(tmpdir string, m Metadata, a Args) error {
-	androidHome, err := findAndroidHome()
+func AndroidAPK(m Metadata, a *Args) error {
+	androidHome, err := FindAndroidHome()
 	if err != nil {
 		return err
 	}
@@ -35,19 +35,48 @@ func AndroidAPK(tmpdir string, m Metadata, a Args) error {
 		return err
 	}
 
-	builDir := filepath.Join(tmpdir, "build")
+	os.RemoveAll(a.BuildDir())
+	os.MkdirAll(a.BuildDir(), 0755)
 
-	if err := compileAndroid(builDir, androidHome, platform, m, a); err != nil {
+	if err := compileAndroid(a, androidHome, platform, m); err != nil {
 		return err
 	}
-	if err := packAndroid(builDir, buildTools, platform, m, a, false); err != nil {
+	if err := packAndroid(a, buildTools, platform, m, false); err != nil {
 		return err
 	}
-	return signDebugApk(builDir, buildTools, m.Name, a.DestPath)
+	return signDebugApk(a, buildTools, m.Name)
 }
 
-func compileAndroid(builDir, androidHome, platform string, m Metadata, a Args) error {
-	ndkRoot, err := findNDK(androidHome)
+func FindAndroidHome() (string, error) {
+	androidHome := os.Getenv("ANDROID_HOME")
+	if androidHome == "" {
+		androidHome = os.Getenv("ANDROID_SDK_ROOT")
+		if androidHome == "" {
+			return "", fmt.Errorf("ANDROID_HOME is not set")
+		}
+	}
+	return androidHome, nil
+}
+
+func FindNDK(androidHome string) (string, error) {
+	ndkRoot, err := findLast(filepath.Join(androidHome, "ndk"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			ndkRoot = os.Getenv("ANDROID_NDK_ROOT")
+			if ndkRoot == "" {
+				return "", fmt.Errorf("no NDK found. Please set ANDROID_NDK_ROOT")
+			}
+		} else {
+			return "", err
+		}
+	}
+	return ndkRoot, nil
+}
+
+func compileAndroid(a *Args, androidHome, platform string, m Metadata) error {
+	buildDir := a.BuildDir()
+
+	ndkRoot, err := FindNDK(androidHome)
 	if err != nil {
 		return err
 	}
@@ -60,15 +89,16 @@ func compileAndroid(builDir, androidHome, platform string, m Metadata, a Args) e
 		return err
 	}
 
-	lib := filepath.Join(builDir, "lib", arch.abi, "libgni.so")
+	lib := filepath.Join(buildDir, "lib", arch.abi, "libgni.so")
 	cmd := exec.Command(
 		"go",
 		"build",
-		"-C", a.Chdir,
 		"-buildmode=c-shared",
 		"-o", lib,
 	)
-	if !a.DebugBuild {
+	if a.DebugBuild() {
+		cmd.Args = append(cmd.Args, "-gcflags=all=-N -l")
+	} else {
 		cmd.Args = append(cmd.Args, "-ldflags=-s -w")
 	}
 	cmd.Env = append(
@@ -92,7 +122,6 @@ func compileAndroid(builDir, androidHome, platform string, m Metadata, a Args) e
 	cmd = exec.Command(
 		"go",
 		"list",
-		"-C", a.Chdir,
 		"-f", "{{.Dir}}",
 		"gni.dev/gni/internal/backend",
 	)
@@ -116,7 +145,7 @@ func compileAndroid(builDir, androidHome, platform string, m Metadata, a Args) e
 		"-Xlint:-options",
 		"-sourcepath", androidSrcPath,
 		"-bootclasspath", filepath.Join(platform, "android.jar"),
-		"-d", filepath.Join(builDir, "classes"),
+		"-d", filepath.Join(buildDir, "classes"),
 	)
 	cmd.Args = append(cmd.Args, androidSrc...)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -126,9 +155,11 @@ func compileAndroid(builDir, androidHome, platform string, m Metadata, a Args) e
 	return nil
 }
 
-func packAndroid(builDir, buildTools, platform string, m Metadata, a Args, bundle bool) error {
+func packAndroid(a *Args, buildTools, platform string, m Metadata, bundle bool) error {
+	buildDir := a.BuildDir()
+
 	var classes []string
-	filepath.WalkDir(filepath.Join(builDir, "classes"), func(path string, d fs.DirEntry, err error) error {
+	filepath.WalkDir(filepath.Join(buildDir, "classes"), func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -140,7 +171,7 @@ func packAndroid(builDir, buildTools, platform string, m Metadata, a Args, bundl
 	cmd := exec.Command(
 		filepath.Join(buildTools, "d8"),
 		"--lib", filepath.Join(platform, "android.jar"),
-		"--output", builDir,
+		"--output", buildDir,
 		"--min-api", strconv.Itoa(m.Android.MinSDK),
 	)
 	cmd.Args = append(cmd.Args, classes...)
@@ -149,10 +180,10 @@ func packAndroid(builDir, buildTools, platform string, m Metadata, a Args, bundl
 		return err
 	}
 
-	manifest := filepath.Join(builDir, "AndroidManifest.xml")
+	manifest := filepath.Join(buildDir, "AndroidManifest.xml")
 	fm := template.FuncMap{
 		"debuggable": func() bool {
-			return a.DebugBuild
+			return a.DebugBuild()
 		},
 	}
 	tmpl, _ := template.New("manifest").Funcs(fm).Parse(androidManifest)
@@ -165,7 +196,7 @@ func packAndroid(builDir, buildTools, platform string, m Metadata, a Args, bundl
 		return err
 	}
 
-	baseAPK := filepath.Join(builDir, "base.apk")
+	baseAPK := filepath.Join(buildDir, "base.apk")
 	cmd = exec.Command(
 		filepath.Join(buildTools, "aapt2"),
 		"link",
@@ -187,7 +218,7 @@ func packAndroid(builDir, buildTools, platform string, m Metadata, a Args, bundl
 	}
 	defer baseZip.Close()
 
-	f, err = os.Create(filepath.Join(builDir, "app.zip"))
+	f, err = os.Create(filepath.Join(buildDir, "app.zip"))
 	if err != nil {
 		return err
 	}
@@ -216,13 +247,13 @@ func packAndroid(builDir, buildTools, platform string, m Metadata, a Args, bundl
 	if bundle {
 		dex = "dex/classes.dex"
 	}
-	if err := addToZip(appZip, filepath.Join(builDir, "classes.dex"), dex); err != nil {
+	if err := addToZip(appZip, filepath.Join(buildDir, "classes.dex"), dex); err != nil {
 		return err
 	}
 
-	for _, a := range archMap {
-		libPath := filepath.Join("lib", a.abi, "libgni.so")
-		libFullPath := filepath.Join(builDir, libPath)
+	for _, arch := range archMap {
+		libPath := filepath.Join("lib", arch.abi, "libgni.so")
+		libFullPath := filepath.Join(buildDir, libPath)
 		if _, err := os.Stat(libFullPath); errors.Is(err, os.ErrNotExist) {
 			continue
 		}
@@ -246,17 +277,6 @@ func findJavaCompiler() (string, error) {
 	return javac, nil
 }
 
-func findAndroidHome() (string, error) {
-	androidHome := os.Getenv("ANDROID_HOME")
-	if androidHome == "" {
-		androidHome = os.Getenv("ANDROID_SDK_ROOT")
-		if androidHome == "" {
-			return "", fmt.Errorf("ANDROID_HOME is not set")
-		}
-	}
-	return androidHome, nil
-}
-
 func findLast(path string) (string, error) {
 	dir, err := os.Open(path)
 	if err != nil {
@@ -270,21 +290,6 @@ func findLast(path string) (string, error) {
 		return "", fmt.Errorf("%w in %s", os.ErrNotExist, path)
 	}
 	return filepath.Join(path, children[len(children)-1]), nil
-}
-
-func findNDK(androidHome string) (string, error) {
-	ndkRoot, err := findLast(filepath.Join(androidHome, "ndk"))
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			ndkRoot = os.Getenv("ANDROID_NDK_ROOT")
-			if ndkRoot == "" {
-				return "", fmt.Errorf("no NDK found. Please set ANDROID_NDK_ROOT")
-			}
-		} else {
-			return "", err
-		}
-	}
-	return ndkRoot, nil
 }
 
 func findNdkCompiler(ndkBin, triple string, minSDK int) (string, error) {
@@ -326,20 +331,15 @@ func addToZip(z *zip.Writer, fileName, path string) error {
 	return err
 }
 
-func signDebugApk(builDir, buildTools, name, dst string) error {
-	src := filepath.Join(builDir, "app.apk")
-	st, err := os.Stat(dst)
-	if err != nil {
-		return err
-	}
-	if st.Mode().IsDir() {
-		dst = filepath.Join(dst, name+".apk")
-	}
+func signDebugApk(a *Args, buildTools, name string) error {
+	buildDir := a.BuildDir()
+	src := filepath.Join(buildDir, "app.apk")
+	dst := filepath.Join(a.OutDir(), name+".apk")
 
 	cmd := exec.Command(
 		filepath.Join(buildTools, "zipalign"),
 		"-p", "4",
-		filepath.Join(builDir, "app.zip"),
+		filepath.Join(buildDir, "app.zip"),
 		src,
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -347,8 +347,8 @@ func signDebugApk(builDir, buildTools, name, dst string) error {
 		return err
 	}
 
-	certPEM := filepath.Join(builDir, "cert.pem")
-	keyPEM := filepath.Join(builDir, "key.pem")
+	certPEM := filepath.Join(buildDir, "cert.pem")
+	keyPEM := filepath.Join(buildDir, "key.pem")
 
 	block, _ := pem.Decode([]byte(debugCert))
 	if block == nil {

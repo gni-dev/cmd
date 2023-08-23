@@ -20,13 +20,12 @@ type Metadata struct {
 	}
 }
 
-func CreateDefaults(a Args) (Metadata, error) {
+func DefaultMetadata() (Metadata, error) {
 	m := Metadata{Build: 1, Version: "0.0.1"}
 
 	cmd := exec.Command(
 		"go",
 		"list",
-		"-C", a.Chdir,
 		"-f", "{{.ImportPath}}",
 	)
 	out, err := cmd.CombinedOutput()
@@ -58,7 +57,7 @@ func CreateDefaults(a Args) (Metadata, error) {
 	return m, nil
 }
 
-func (m *Metadata) fixupAndroidVer() {
+func (m *Metadata) FixupAndroidVer() {
 	if m.Android.MinSDK < 19 {
 		m.Android.MinSDK = 19
 	}

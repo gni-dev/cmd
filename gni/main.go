@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"gni.dev/cmd/gni/internal/build"
+	"gni.dev/cmd/gni/internal/run"
 )
 
 func main() {
@@ -16,6 +17,8 @@ func main() {
 	switch os.Args[1] {
 	case "build":
 		build.Run(os.Args[2:])
+	case "run":
+		run.Run(os.Args[2:])
 	default:
 		fmt.Fprintln(os.Stderr, "Unknown command:", os.Args[1])
 		os.Exit(1)
