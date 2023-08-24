@@ -15,14 +15,14 @@ func Run(args []string) {
 	}
 	target := args[0]
 
-	buildFlags := flag.NewFlagSet("run", flag.ExitOnError)
-	a := build.CreateArgs(buildFlags)
-	if err := buildFlags.Parse(args[1:]); err != nil {
+	runFlags := flag.NewFlagSet("run", flag.ExitOnError)
+	a := CreateArgs(runFlags)
+	if err := runFlags.Parse(args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	if err := os.Chdir(a.Chdir()); err != nil {
+	if err := os.Chdir(a.buildArgs.Chdir()); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

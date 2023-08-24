@@ -10,18 +10,18 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"time"
 
 	"gni.dev/cmd/gni/internal/build"
 )
 
 const mainActivity = "dev.gni.GniActivity"
 
-func runAndroid(m build.Metadata, a *build.Args) error {
-	if err := build.AndroidAPK(m, a); err != nil {
+func runAndroid(m build.Metadata, a *Args) error {
+	a.buildArgs.WaitDebugger(a.buildArgs.DebugBuild() && a.wait)
+	if err := build.AndroidAPK(m, a.buildArgs); err != nil {
 		return err
 	}
-	apk := filepath.Join(a.OutDir(), m.Name+".apk")
+	apk := filepath.Join(a.buildArgs.OutDir(), m.Name+".apk")
 
 	androidHome, err := build.FindAndroidHome()
 	if err != nil {
@@ -44,12 +44,12 @@ func runAndroid(m build.Metadata, a *build.Args) error {
 		return err
 	}
 
-	if !a.DebugBuild() {
+	if !a.buildArgs.DebugBuild() {
 		_, err := adb.Shell("am", "start", fmt.Sprintf("%s/%s", m.AppID, mainActivity))
 		return err
 	}
 
-	dbgDir := filepath.Join(a.OutDir(), "dbg")
+	dbgDir := filepath.Join(a.buildArgs.OutDir(), "dbg")
 	os.MkdirAll(dbgDir, 0755)
 	dataDir, err := adb.RunAs(m.AppID, "pwd")
 	if err != nil {
@@ -63,11 +63,11 @@ func runAndroid(m build.Metadata, a *build.Args) error {
 		return err
 	}
 
-	if _, err := adb.Shell("am", "start", "-n", fmt.Sprintf("%s/%s", m.AppID, mainActivity)); err != nil {
+	if _, err := adb.Shell("am", "start", "-W", fmt.Sprintf("%s/%s", m.AppID, mainActivity)); err != nil {
 		return err
 	}
 
-	pid, err := waitProcess(m.AppID, adb)
+	pid, err := adb.RunAs(m.AppID, "pidof", m.AppID)
 	if err != nil {
 		return err
 	}
@@ -157,15 +157,4 @@ func fetchGDBServer(arch, path string) error {
 		return err
 	}
 	return nil
-}
-
-func waitProcess(appID string, adb *ADB) (string, error) {
-	for i := 0; i < 10; i++ {
-		pid, err := adb.RunAs(appID, "pidof", appID)
-		if err == nil {
-			return pid, nil
-		}
-		time.Sleep(1 * time.Second)
-	}
-	return "", fmt.Errorf("process %s did not start", appID)
 }

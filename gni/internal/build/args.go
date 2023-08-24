@@ -6,17 +6,18 @@ import (
 )
 
 type Args struct {
-	chdir      string
-	outDir     string
-	debugBuild bool
+	chdir        string
+	outDir       string
+	debugBuild   bool
+	waitDebugger bool
 }
 
 func CreateArgs(f *flag.FlagSet) *Args {
-	var args Args
-	f.StringVar(&args.chdir, "C", "dir", "Change working directory before building")
-	f.StringVar(&args.outDir, "o", "", "Output path. Default is out/")
-	f.BoolVar(&args.debugBuild, "debug", false, "Build on debug mode")
-	return &args
+	var a Args
+	f.StringVar(&a.chdir, "C", "dir", "Change working directory before building")
+	f.StringVar(&a.outDir, "o", "", "Output path. Default is out/")
+	f.BoolVar(&a.debugBuild, "debug", false, "Build on debug mode")
+	return &a
 }
 
 func (a *Args) Chdir() string {
@@ -41,4 +42,8 @@ func (a *Args) BuildDir() string {
 
 func (a *Args) DebugBuild() bool {
 	return a.debugBuild
+}
+
+func (a *Args) WaitDebugger(wait bool) {
+	a.waitDebugger = wait
 }

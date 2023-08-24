@@ -96,6 +96,9 @@ func compileAndroid(a *Args, androidHome, platform string, m Metadata) error {
 		"-buildmode=c-shared",
 		"-o", lib,
 	)
+	if a.waitDebugger {
+		cmd.Args = append(cmd.Args, "-tags", "wait_debugger")
+	}
 	if a.DebugBuild() {
 		cmd.Args = append(cmd.Args, "-gcflags=all=-N -l")
 	} else {
