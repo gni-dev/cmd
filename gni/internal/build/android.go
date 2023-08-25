@@ -183,6 +183,25 @@ func packAndroid(a *Args, buildTools, platform string, m Metadata, bundle bool) 
 		return err
 	}
 
+	resDir := filepath.Join(buildDir, "res")
+	valDir := filepath.Join(resDir, "values")
+	os.MkdirAll(valDir, 0755)
+	if err := os.WriteFile(filepath.Join(valDir, "themes.xml"), []byte(androidTheme), 0644); err != nil {
+		return err
+	}
+
+	res := filepath.Join(buildDir, "resources.zip")
+	cmd = exec.Command(
+		filepath.Join(buildTools, "aapt2"),
+		"compile",
+		"-o", res,
+		"--dir", resDir,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		os.Stderr.Write(out)
+		return err
+	}
+
 	manifest := filepath.Join(buildDir, "AndroidManifest.xml")
 	fm := template.FuncMap{
 		"debuggable": func() bool {
@@ -206,6 +225,7 @@ func packAndroid(a *Args, buildTools, platform string, m Metadata, bundle bool) 
 		"--manifest", manifest,
 		"-o", baseAPK,
 		"-I", filepath.Join(platform, "android.jar"),
+		res,
 	)
 	if bundle {
 		cmd.Args = append(cmd.Args, "--proto-format")
@@ -229,11 +249,14 @@ func packAndroid(a *Args, buildTools, platform string, m Metadata, bundle bool) 
 
 	appZip := zip.NewWriter(f)
 	for _, f := range baseZip.File {
-		path := f.Name
-		if path == "AndroidManifest.xml" && bundle {
-			path = "manifest/AndroidManifest.xml"
+		h := zip.FileHeader{
+			Name:   f.FileHeader.Name,
+			Method: f.FileHeader.Method,
 		}
-		w, err := appZip.Create(path)
+		if h.Name == "AndroidManifest.xml" && bundle {
+			h.Name = "manifest/AndroidManifest.xml"
+		}
+		w, err := appZip.CreateHeader(&h)
 		if err != nil {
 			return err
 		}
@@ -336,14 +359,14 @@ func addToZip(z *zip.Writer, fileName, path string) error {
 
 func signDebugApk(a *Args, buildTools, name string) error {
 	buildDir := a.BuildDir()
-	src := filepath.Join(buildDir, "app.apk")
+	alligned := filepath.Join(buildDir, "app.apk")
 	dst := filepath.Join(a.OutDir(), name+".apk")
 
 	cmd := exec.Command(
 		filepath.Join(buildTools, "zipalign"),
 		"-p", "4",
 		filepath.Join(buildDir, "app.zip"),
-		src,
+		alligned,
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		os.Stderr.Write(out)
@@ -393,7 +416,7 @@ func signDebugApk(a *Args, buildTools, name string) error {
 		"--cert", certPEM,
 		"--key", keyPEM,
 		"--out", dst,
-		src,
+		alligned,
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		os.Stderr.Write(out)
@@ -417,8 +440,9 @@ const androidManifest = `<?xml version="1.0" encoding="utf-8"?>
 		android:debuggable="{{debuggable}}" >
 		<activity
 			android:name="dev.gni.GniActivity"
-			android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
-			android:label="{{.Name}}" >
+			android:theme="@style/Theme.Gni"
+			android:label="{{.Name}}"
+			android:exported="true" >
 			<intent-filter>
 				<action android:name="android.intent.action.MAIN" />
 				<category android:name="android.intent.category.LAUNCHER" />
@@ -426,6 +450,13 @@ const androidManifest = `<?xml version="1.0" encoding="utf-8"?>
 		</activity>
 	</application>
 </manifest>`
+
+const androidTheme = `<?xml version="1.0" encoding="utf-8"?>
+<resources>
+	<style name="Theme.Gni" parent="android:style/Theme.NoTitleBar">
+		<item name="android:windowBackground">@android:color/white</item>
+	</style>
+</resources>`
 
 const debugCert = `-----BEGIN RSA PRIVATE KEY-----
 MIIEogIBAAKCAQEAsntq5mmR2BV1CXypkk7EmVQVFwW4BioBlO9nTFLS6Vc0LWUU
