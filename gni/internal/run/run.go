@@ -22,9 +22,11 @@ func Run(args []string) {
 		os.Exit(1)
 	}
 
-	if err := os.Chdir(a.buildArgs.Chdir()); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	if a.buildArgs.Chdir() != "." {
+		if err := os.Chdir(a.buildArgs.Chdir()); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	}
 
 	m, err := build.DefaultMetadata()

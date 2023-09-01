@@ -20,9 +20,11 @@ func Run(args []string) {
 		os.Exit(1)
 	}
 
-	if err := os.Chdir(a.Chdir()); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	if a.Chdir() != "." {
+		if err := os.Chdir(a.Chdir()); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	}
 
 	m, err := DefaultMetadata()

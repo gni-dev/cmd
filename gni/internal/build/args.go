@@ -14,7 +14,7 @@ type Args struct {
 
 func CreateArgs(f *flag.FlagSet) *Args {
 	var a Args
-	f.StringVar(&a.chdir, "C", "dir", "Change working directory before building")
+	f.StringVar(&a.chdir, "C", ".", "Change working directory before building")
 	f.StringVar(&a.outDir, "o", "", "Output path. Default is out/")
 	f.BoolVar(&a.debugBuild, "debug", false, "Build on debug mode")
 	return &a
