@@ -17,6 +17,7 @@ import (
 const mainActivity = "dev.gni.GniActivity"
 
 func runAndroid(m build.Metadata, a *Args) error {
+	fmt.Printf("Building package %s...\n", m.Name)
 	a.buildArgs.WaitDebugger(a.buildArgs.DebugBuild() && a.wait)
 	if err := build.AndroidAPK(m, a.buildArgs); err != nil {
 		return err
@@ -28,7 +29,16 @@ func runAndroid(m build.Metadata, a *Args) error {
 		return err
 	}
 
-	adb, err := NewADB(androidHome)
+	devices, err := AndroidDevices(androidHome)
+	if err != nil {
+		return err
+	}
+	if len(devices) == 0 {
+		return errors.New("no android devices found")
+	}
+
+	fmt.Printf("Connecting to %s...\n", devices[0])
+	adb, err := NewADB(androidHome, devices[0])
 	if err != nil {
 		return err
 	}
@@ -55,6 +65,7 @@ func runAndroid(m build.Metadata, a *Args) error {
 	if err != nil {
 		return err
 	}
+	adb.RunAs(m.AppID, "chmod", "a+x", dataDir)
 
 	if err := installGDBServer(dbgDir, dataDir, m.AppID, adb); err != nil {
 		return err
@@ -63,7 +74,9 @@ func runAndroid(m build.Metadata, a *Args) error {
 		return err
 	}
 
-	if _, err := adb.Shell("am", "start", "-W", fmt.Sprintf("%s/%s", m.AppID, mainActivity)); err != nil {
+	intent := fmt.Sprintf("%s/%s", m.AppID, mainActivity)
+	fmt.Printf("Launching activity %s...\n", intent)
+	if _, err := adb.Shell("am", "start", "-W", intent); err != nil {
 		return err
 	}
 
@@ -78,6 +91,7 @@ func runAndroid(m build.Metadata, a *Args) error {
 	if err := adb.Forward("tcp:5039", "localfilesystem:"+debugSocket); err != nil {
 		return err
 	}
+	fmt.Printf("Starting gdbserver...\n")
 	if _, err := adb.RunAs(m.AppID, path.Join(dataDir, "gdbserver"), "--once", "--attach", "+"+debugSocket, pid); err != nil {
 		return err
 	}
