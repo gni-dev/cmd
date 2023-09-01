@@ -72,8 +72,13 @@ func runAndroid(m build.Metadata, a *Args) error {
 		return err
 	}
 
-	adb.Forward("tcp:5039", "tcp:5039")
-	if _, err := adb.RunAs(m.AppID, path.Join(dataDir, "gdbserver"), "--once", "--attach", "localhost:5039", pid); err != nil {
+	debugSocket := path.Join(dataDir, "debug.sock")
+	adb.RunAs(m.AppID, "rm", debugSocket)
+
+	if err := adb.Forward("tcp:5039", "localfilesystem:"+debugSocket); err != nil {
+		return err
+	}
+	if _, err := adb.RunAs(m.AppID, path.Join(dataDir, "gdbserver"), "--once", "--attach", "+"+debugSocket, pid); err != nil {
 		return err
 	}
 	return adb.ForwardRemove("tcp:5039")
