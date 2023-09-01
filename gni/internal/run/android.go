@@ -18,7 +18,7 @@ const mainActivity = "dev.gni.GniActivity"
 
 func runAndroid(m build.Metadata, a *Args) error {
 	fmt.Printf("Building package %s...\n", m.Name)
-	a.buildArgs.WaitDebugger(a.buildArgs.DebugBuild() && a.wait)
+	a.buildArgs.WaitDebugger(a.wait)
 	if err := build.AndroidAPK(m, a.buildArgs); err != nil {
 		return err
 	}
