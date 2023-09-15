@@ -3,7 +3,7 @@ package run
 import (
 	"flag"
 
-	"gni.dev/cmd/gni/internal/build"
+	"gni.dev/cmd/internal/build"
 )
 
 type Args struct {

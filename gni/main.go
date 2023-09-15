@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"gni.dev/cmd/gni/internal/build"
-	"gni.dev/cmd/gni/internal/run"
+	"gni.dev/cmd/internal/build"
+	"gni.dev/cmd/internal/dbg"
+	"gni.dev/cmd/internal/run"
 )
 
 func main() {
@@ -19,6 +20,8 @@ func main() {
 		build.Run(os.Args[2:])
 	case "run":
 		run.Run(os.Args[2:])
+	case "debug":
+		dbg.Run(os.Args[2:])
 	default:
 		fmt.Fprintln(os.Stderr, "Unknown command:", os.Args[1])
 		os.Exit(1)

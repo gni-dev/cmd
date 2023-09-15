@@ -8,7 +8,7 @@ import (
 
 func Run(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "Please specify target (apk)")
+		fmt.Fprintln(os.Stderr, "Please specify target (android or ios)")
 		os.Exit(1)
 	}
 	target := args[0]
@@ -35,8 +35,10 @@ func Run(args []string) {
 	m.FixupAndroidVer()
 
 	switch target {
-	case "apk":
-		err = AndroidAPK(m, a)
+	case "android":
+		err = BuildAndroid(m, a)
+	case "ios":
+		err = BuildIOS(m, a)
 	default:
 		fmt.Fprintln(os.Stderr, "Unknown target:", target)
 		os.Exit(1)

@@ -11,7 +11,7 @@ import (
 	"path"
 	"path/filepath"
 
-	"gni.dev/cmd/gni/internal/build"
+	"gni.dev/cmd/internal/build"
 )
 
 const mainActivity = "dev.gni.GniActivity"
@@ -19,7 +19,7 @@ const mainActivity = "dev.gni.GniActivity"
 func runAndroid(m build.Metadata, a *Args) error {
 	fmt.Printf("Building package %s...\n", m.Name)
 	a.buildArgs.WaitDebugger(a.wait)
-	if err := build.AndroidAPK(m, a.buildArgs); err != nil {
+	if err := build.BuildAndroid(m, a.buildArgs); err != nil {
 		return err
 	}
 	apk := filepath.Join(a.buildArgs.OutDir(), m.Name+".apk")

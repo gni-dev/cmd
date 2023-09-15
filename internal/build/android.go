@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-func AndroidAPK(m Metadata, a *Args) error {
+func BuildAndroid(m Metadata, a *Args) error {
 	androidHome, err := FindAndroidHome()
 	if err != nil {
 		return err

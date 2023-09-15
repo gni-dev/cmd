@@ -1,3 +1,3 @@
 module gni.dev/cmd
 
-go 1.20
+go 1.18

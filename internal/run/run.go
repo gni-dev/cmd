@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"gni.dev/cmd/gni/internal/build"
+	"gni.dev/cmd/internal/build"
 )
 
 func Run(args []string) {
