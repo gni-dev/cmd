@@ -2,17 +2,40 @@ package lldb
 
 import (
 	"bufio"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 )
 
 const maxRetransmits = 5
 
+type GeneralError struct {
+	cmd  string
+	code string
+}
+
+func (err *GeneralError) Error() string {
+	cmd := err.cmd
+	if len(cmd) > 10 {
+		cmd = cmd[:10] + "..."
+	}
+	if err.code == "" {
+		return fmt.Sprintf("lldb: %s failed", cmd)
+	} else {
+		return fmt.Sprintf("lldb: %s failed with code %s", cmd, err.code)
+	}
+}
+
 type conn struct {
-	remote io.ReadWriter
-	br     *bufio.Reader
-	ack    bool
+	remote     io.ReadWriter
+	br         *bufio.Reader
+	ack        bool
+	packetSize int
+}
+
+type stopPacket struct {
 }
 
 func newConn(remote io.ReadWriter) *conn {
@@ -21,6 +44,7 @@ func newConn(remote io.ReadWriter) *conn {
 
 func (c *conn) handshake() error {
 	c.ack = true
+	c.packetSize = 256
 
 	if err := c.sendACK(true); err != nil {
 		return err
@@ -28,14 +52,68 @@ func (c *conn) handshake() error {
 	if err := c.disableACK(); err != nil {
 		return err
 	}
+	stub, err := c.getFeatures("xmlRegisters=i386;multiprocess+")
+	if err != nil {
+		return err
+	}
+	if v, ok := stub["PacketSize"]; ok {
+		if i, err := strconv.Atoi(v); err == nil {
+			c.packetSize = i
+		}
+	}
 	return nil
+}
+
+func (c *conn) disableACK() error {
+	resp, err := c.exec("QStartNoAckMode")
+	c.ack = (resp != "OK")
+	return err
+}
+
+func (c *conn) getFeatures(features string) (map[string]string, error) {
+	resp, err := c.exec("qSupported:" + features)
+	if err != nil {
+		return nil, err
+	}
+	stub := make(map[string]string)
+	ls := strings.Split(resp, ";")
+	for _, f := range ls {
+		kv := strings.Split(f, "=")
+		if len(kv) == 2 {
+			stub[kv[0]] = kv[1]
+		} else if len(f) > 0 {
+			stub[f[:len(f)-1]] = f[len(f)-1:]
+		}
+	}
+	return stub, nil
+}
+
+func (c *conn) run(program string, args []string) (stopPacket, error) {
+	params := hex.EncodeToString([]byte(program))
+	for _, arg := range args {
+		params += ";" + hex.EncodeToString([]byte(arg))
+	}
+	resp, err := c.exec("vRun;" + params)
+	if err != nil {
+		return stopPacket{}, err
+	}
+	return c.stopReply(resp)
+}
+
+func (c *conn) stopReply(resp string) (stopPacket, error) {
+	switch resp[0] {
+	case 'T':
+		return stopPacket{}, nil
+	default:
+		return stopPacket{}, fmt.Errorf("unknown stop reply: %s", resp)
+	}
 }
 
 func (c *conn) exec(cmd string) (string, error) {
 	if err := c.send(cmd); err != nil {
 		return "", err
 	}
-	return c.recv()
+	return c.recv(cmd)
 }
 
 func (c *conn) send(cmd string) error {
@@ -61,9 +139,19 @@ func (c *conn) send(cmd string) error {
 	return fmt.Errorf("failed to send %s after %d attempts", cmd, maxRetransmits)
 }
 
-func (c *conn) recv() (string, error) {
+func checkForErr(cmd string, resp string) (string, error) {
+	if len(resp) == 0 {
+		return "", &GeneralError{}
+	} else if resp[0] == 'E' && len(resp) == 3 {
+		return "", &GeneralError{code: resp}
+	} else {
+		return resp, nil
+	}
+}
+
+func (c *conn) recv(cmd string) (string, error) {
 	for i := 0; i < maxRetransmits; i++ {
-		res, err := c.br.ReadBytes('#')
+		resp, err := c.br.ReadBytes('#')
 		if err != nil {
 			return "", err
 		}
@@ -73,11 +161,11 @@ func (c *conn) recv() (string, error) {
 			return "", err
 		}
 
-		if res[0] == '%' {
+		if resp[0] == '%' {
 			continue // ignore async notifications
 		}
 
-		payload := string(res[1 : len(res)-1])
+		payload := string(resp[1 : len(resp)-1])
 		sum, err := strconv.ParseUint(string(buf), 16, 8)
 		if err != nil {
 			return "", err
@@ -86,9 +174,9 @@ func (c *conn) recv() (string, error) {
 
 		if !c.ack {
 			if sumOK {
-				return payload, nil
+				return checkForErr(cmd, payload)
 			} else {
-				return "", fmt.Errorf("checksum mismatch: %s", res)
+				return "", fmt.Errorf("checksum mismatch: %s", resp)
 			}
 		}
 
@@ -96,7 +184,7 @@ func (c *conn) recv() (string, error) {
 			if err := c.sendACK(true); err != nil {
 				return "", err
 			}
-			return payload, nil
+			return checkForErr(cmd, payload)
 		}
 		if err := c.sendACK(false); err != nil {
 			return "", err
@@ -121,12 +209,6 @@ func (c *conn) recvACK() (bool, error) {
 		return false, fmt.Errorf("invalid ack byte: %c", b)
 	}
 	return b == '+', err
-}
-
-func (c *conn) disableACK() error {
-	res, err := c.exec("QStartNoAckMode")
-	c.ack = (res != "OK")
-	return err
 }
 
 func checksum(cmd string) uint8 {

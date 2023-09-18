@@ -10,14 +10,14 @@ func New() *Debugger {
 	return &Debugger{}
 }
 
-func (d *Debugger) Launch(exec string) error {
+func (d *Debugger) Launch(program string, args []string) error {
 	var err error
 	d.lldb, err = lldb.LaunchServer()
 	if err != nil {
 		return err
 	}
 
-	return nil
+	return d.lldb.Run(program, args)
 }
 
 func (d *Debugger) Detach() error {

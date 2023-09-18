@@ -64,6 +64,11 @@ func (l *LLDB) Detach() error {
 	return nil
 }
 
+func (l *LLDB) Run(program string, args []string) error {
+	_, err := l.c.run(program, args)
+	return err
+}
+
 func tryConnect(network, address string) (conn net.Conn, err error) {
 	for i := time.Duration(100); i < 5000; i += 100 {
 		conn, err = net.Dial(network, address)

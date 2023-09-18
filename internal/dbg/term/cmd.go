@@ -62,8 +62,5 @@ func (c *Commands) run(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("no executable specified")
 	}
-	if err := c.d.Launch(args[0]); err != nil {
-		return err
-	}
-	return nil
+	return c.d.Launch(args[0], args[1:])
 }
