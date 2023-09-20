@@ -21,7 +21,9 @@ func main() {
 	case "run":
 		run.Run(os.Args[2:])
 	case "debug":
-		dbg.Run(os.Args[2:])
+		dbg.RunDebug(os.Args[2:])
+	case "dap":
+		dbg.RunDAP(os.Args[2:])
 	default:
 		fmt.Fprintln(os.Stderr, "Unknown command:", os.Args[1])
 		os.Exit(1)

@@ -6,13 +6,18 @@ import (
 	"io"
 	"os"
 
+	"gni.dev/cmd/internal/dbg/dap"
 	"gni.dev/cmd/internal/dbg/term"
 )
 
-var argInit string
-
-func Run(args []string) {
-	parseArgs(args)
+func RunDebug(args []string) {
+	var argInit string
+	dbgFlags := flag.NewFlagSet("debug", flag.ExitOnError)
+	dbgFlags.StringVar(&argInit, "init", "", "initial command to run")
+	if err := dbgFlags.Parse(args); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	st := setRawTerminal()
 	defer st.Restore()
@@ -28,10 +33,28 @@ func Run(args []string) {
 	}
 }
 
-func parseArgs(args []string) {
-	dbgFlags := flag.NewFlagSet("dbg", flag.ExitOnError)
-	dbgFlags.StringVar(&argInit, "init", "", "initial command to run")
+func RunDAP(args []string) {
+	var port int
+	dbgFlags := flag.NewFlagSet("dap", flag.ExitOnError)
+	dbgFlags.IntVar(&port, "port", 0, "port to listen on")
 	if err := dbgFlags.Parse(args); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	var err error
+	if port > 0 {
+		s := dap.NewServer(port)
+		err = s.Run()
+	} else {
+		pipe := struct {
+			io.Reader
+			io.Writer
+		}{os.Stdin, os.Stdout}
+		s := dap.NewSession(pipe)
+		s.Serve()
+	}
+	if err != nil && err != io.EOF {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
