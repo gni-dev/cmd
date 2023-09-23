@@ -23,8 +23,8 @@ func (m *baseMessage) seq() int { return m.Seq }
 type request struct {
 	baseMessage
 
-	Command   string                 `json:"command"`
-	Arguments map[string]interface{} `json:"arguments,omitempty"`
+	Command   string          `json:"command"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
 }
 
 type event struct {

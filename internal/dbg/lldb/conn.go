@@ -2,6 +2,7 @@ package lldb
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -38,6 +39,12 @@ type conn struct {
 type stopPacket struct {
 }
 
+type processInfo struct {
+	name   string
+	pid    int
+	triple string
+}
+
 func newConn(remote io.ReadWriter) *conn {
 	return &conn{remote: remote, br: bufio.NewReader(remote)}
 }
@@ -66,7 +73,7 @@ func (c *conn) handshake() error {
 
 func (c *conn) disableACK() error {
 	resp, err := c.exec("QStartNoAckMode")
-	c.ack = (resp != "OK")
+	c.ack = (string(resp) != "OK")
 	return err
 }
 
@@ -76,7 +83,7 @@ func (c *conn) getFeatures(features string) (map[string]string, error) {
 		return nil, err
 	}
 	stub := make(map[string]string)
-	ls := strings.Split(resp, ";")
+	ls := strings.Split(string(resp), ";")
 	for _, f := range ls {
 		kv := strings.Split(f, "=")
 		if len(kv) == 2 {
@@ -100,7 +107,37 @@ func (c *conn) run(program string, args []string) (stopPacket, error) {
 	return c.stopReply(resp)
 }
 
-func (c *conn) stopReply(resp string) (stopPacket, error) {
+func (c *conn) qXfer(kind, annex string) ([]byte, error) {
+	buf := &bytes.Buffer{}
+	for {
+		resp, err := c.exec(fmt.Sprintf("qXfer:%s:read:%s:%x,%x", kind, annex, buf.Len(), c.packetSize))
+		if err != nil {
+			return nil, err
+		}
+		buf.Write(resp[1:])
+		if resp[0] == 'l' {
+			return buf.Bytes(), nil
+		}
+	}
+}
+
+func (c *conn) getProcessInfo() (processInfo, error) {
+	resp, err := c.exec("qProcessInfo")
+	if err != nil {
+		return processInfo{}, err
+	}
+	return parseProcessInfo(resp, 16), nil
+}
+
+func (c *conn) getProcessInfoPID(pid int) (processInfo, error) {
+	resp, err := c.exec(fmt.Sprintf("qProcessInfoPID:%d", pid))
+	if err != nil {
+		return processInfo{}, err
+	}
+	return parseProcessInfo(resp, 10), nil
+}
+
+func (c *conn) stopReply(resp []byte) (stopPacket, error) {
 	switch resp[0] {
 	case 'T':
 		return stopPacket{}, nil
@@ -109,15 +146,15 @@ func (c *conn) stopReply(resp string) (stopPacket, error) {
 	}
 }
 
-func (c *conn) exec(cmd string) (string, error) {
+func (c *conn) exec(cmd string) ([]byte, error) {
 	if err := c.send(cmd); err != nil {
-		return "", err
+		return nil, err
 	}
 	return c.recv(cmd)
 }
 
 func (c *conn) send(cmd string) error {
-	p := fmt.Sprintf("$%s#%02x", cmd, checksum(cmd))
+	p := fmt.Sprintf("$%s#%02x", cmd, checksum([]byte(cmd)))
 
 	for i := 0; i < maxRetransmits; i++ {
 		if _, err := c.remote.Write([]byte(p)); err != nil {
@@ -139,58 +176,61 @@ func (c *conn) send(cmd string) error {
 	return fmt.Errorf("failed to send %s after %d attempts", cmd, maxRetransmits)
 }
 
-func checkForErr(cmd string, resp string) (string, error) {
+func checkForErr(cmd string, resp []byte) ([]byte, error) {
 	if len(resp) == 0 {
-		return "", &GeneralError{}
+		return nil, &GeneralError{cmd: cmd, code: "0"}
 	} else if resp[0] == 'E' && len(resp) == 3 {
-		return "", &GeneralError{code: resp}
+		return nil, &GeneralError{cmd: cmd, code: string(resp)}
 	} else {
 		return resp, nil
 	}
 }
 
-func (c *conn) recv(cmd string) (string, error) {
-	for i := 0; i < maxRetransmits; i++ {
+func (c *conn) recv(cmd string) ([]byte, error) {
+	for attempt := 0; attempt < maxRetransmits; {
 		resp, err := c.br.ReadBytes('#')
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 
 		buf := make([]byte, 2)
 		if _, err := io.ReadFull(c.br, buf); err != nil {
-			return "", err
+			return nil, err
 		}
 
-		if resp[0] == '%' {
-			continue // ignore async notifications
+		if resp[0] != '$' {
+			continue // ignore notify and other packets
 		}
 
-		payload := string(resp[1 : len(resp)-1])
+		payload := resp[1 : len(resp)-1]
 		sum, err := strconv.ParseUint(string(buf), 16, 8)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		sumOK := (uint8(sum) == checksum(payload))
+
+		payload = unescape(payload)
 
 		if !c.ack {
 			if sumOK {
 				return checkForErr(cmd, payload)
 			} else {
-				return "", fmt.Errorf("checksum mismatch: %s", resp)
+				return nil, fmt.Errorf("checksum mismatch: %s", payload)
 			}
 		}
 
 		if sumOK {
 			if err := c.sendACK(true); err != nil {
-				return "", err
+				return nil, err
 			}
 			return checkForErr(cmd, payload)
 		}
 		if err := c.sendACK(false); err != nil {
-			return "", err
+			return nil, err
 		}
+		attempt++
 	}
-	return "", fmt.Errorf("failed to recv data after %d attempts", maxRetransmits)
+	return nil, fmt.Errorf("failed to recv data after %d attempts", maxRetransmits)
 }
 
 func (c *conn) sendACK(ack bool) error {
@@ -211,10 +251,50 @@ func (c *conn) recvACK() (bool, error) {
 	return b == '+', err
 }
 
-func checksum(cmd string) uint8 {
+func unescape(packet []byte) []byte {
+	var buf bytes.Buffer
+	for i := 0; i < len(packet); i++ {
+		switch c := packet[i]; c {
+		case 0x7d:
+			if i+1 < len(packet) {
+				buf.WriteByte(packet[i+1] ^ 0x20)
+				i++
+			}
+		default:
+			buf.WriteByte(c)
+		}
+		// lldb should not use RLE compression
+	}
+	return buf.Bytes()
+}
+
+func checksum(packet []byte) uint8 {
 	var sum uint8
-	for _, b := range []byte(cmd) {
+	for _, b := range packet {
 		sum += b
 	}
 	return sum
+}
+
+func parseProcessInfo(resp []byte, base int) processInfo {
+	var i processInfo
+	ls := strings.Split(string(resp), ";")
+	for _, f := range ls {
+		kv := strings.Split(f, ":")
+		if len(kv) != 2 {
+			continue
+		}
+		switch kv[0] {
+		case "name":
+			v, _ := hex.DecodeString(kv[1])
+			i.name = string(v)
+		case "pid":
+			v, _ := strconv.ParseInt(kv[1], base, 32)
+			i.pid = int(v)
+		case "triple":
+			v, _ := hex.DecodeString(kv[1])
+			i.triple = string(v)
+		}
+	}
+	return i
 }

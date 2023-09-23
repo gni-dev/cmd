@@ -1,6 +1,7 @@
 package lldb
 
 import (
+	"debug/elf"
 	"fmt"
 	"io"
 	"net"
@@ -9,6 +10,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"gni.dev/cmd/internal/dbg"
 )
 
 type LLDB struct {
@@ -18,7 +21,7 @@ type LLDB struct {
 	connCloser io.Closer
 }
 
-func LaunchServer() (*LLDB, error) {
+func LaunchServer() (dbg.Debugger, error) {
 	path, err := exec.LookPath("lldb-server")
 	if err != nil {
 		return nil, fmt.Errorf("lldb-server unavailable: %v", err)
@@ -57,6 +60,21 @@ func LaunchServer() (*LLDB, error) {
 	}, nil
 }
 
+func (l *LLDB) Run(program string, args []string) error {
+	if _, err := l.c.run(program, args); err != nil {
+		return err
+	}
+	pi, err := l.c.getProcessInfo()
+	if err != nil {
+		return err
+	}
+	pi, err = l.c.getProcessInfoPID(pi.pid)
+	if err != nil {
+		return err
+	}
+	return l.readImage(pi.name)
+}
+
 func (l *LLDB) Detach() error {
 	if err := l.connCloser.Close(); err != nil {
 		return err
@@ -64,9 +82,26 @@ func (l *LLDB) Detach() error {
 	return nil
 }
 
-func (l *LLDB) Run(program string, args []string) error {
-	_, err := l.c.run(program, args)
-	return err
+func (l *LLDB) readImage(filename string) error {
+	f, err := openFile(l.c, filename)
+	if err != nil {
+		return err
+	}
+	defer f.close()
+
+	elfFile, err := elf.NewFile(f)
+	if err != nil {
+		return err
+	}
+
+	dwarf, err := elfFile.DWARF()
+	if err != nil {
+		return err
+	}
+
+	dwarf.Reader().Next()
+
+	return nil
 }
 
 func tryConnect(network, address string) (conn net.Conn, err error) {

@@ -5,7 +5,8 @@ import (
 	"os"
 
 	"gni.dev/cmd/internal/build"
-	"gni.dev/cmd/internal/dbg"
+	"gni.dev/cmd/internal/dbg/dap"
+	"gni.dev/cmd/internal/dbg/term"
 	"gni.dev/cmd/internal/run"
 )
 
@@ -21,9 +22,9 @@ func main() {
 	case "run":
 		run.Run(os.Args[2:])
 	case "debug":
-		dbg.RunDebug(os.Args[2:])
+		term.Run(os.Args[2:])
 	case "dap":
-		dbg.RunDAP(os.Args[2:])
+		dap.Run(os.Args[2:])
 	default:
 		fmt.Fprintln(os.Stderr, "Unknown command:", os.Args[1])
 		os.Exit(1)

@@ -5,7 +5,8 @@ import (
 	"io"
 	"strings"
 
-	"gni.dev/cmd/internal/dbg/debugger"
+	"gni.dev/cmd/internal/dbg"
+	"gni.dev/cmd/internal/dbg/lldb"
 )
 
 type command struct {
@@ -15,7 +16,7 @@ type command struct {
 
 type Commands struct {
 	cmds []command
-	d    *debugger.Debugger
+	d    dbg.Debugger
 }
 
 func DebuggerCommands() *Commands {
@@ -30,7 +31,6 @@ func DebuggerCommands() *Commands {
 			fn:      c.run,
 		},
 	)
-	c.d = debugger.New()
 	return c
 }
 
@@ -62,5 +62,10 @@ func (c *Commands) run(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("no executable specified")
 	}
-	return c.d.Launch(args[0], args[1:])
+	var err error
+	c.d, err = lldb.LaunchServer()
+	if err != nil {
+		return err
+	}
+	return c.d.Run(args[0], args[1:])
 }

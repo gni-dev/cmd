@@ -5,19 +5,20 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 type MockTerminal struct {
 	input     io.Reader
 	chunkSize int
-	output    *bytes.Buffer
+	output    bytes.Buffer
 }
 
 func NewMockTerminal(input string, ch int) *MockTerminal {
 	return &MockTerminal{
 		input:     strings.NewReader(input),
 		chunkSize: ch,
-		output:    &bytes.Buffer{},
 	}
 }
 
@@ -37,7 +38,6 @@ func (c *MockTerminal) Write(data []byte) (int, error) {
 var inputTests = []struct {
 	input      string
 	want       string
-	err        error
 	skeepLines int
 }{
 	{
@@ -69,17 +69,11 @@ func TestInput(t *testing.T) {
 			tt := New(screen, "> ")
 			for k := 0; k < test.skeepLines; k++ {
 				_, err := tt.readLine()
-				if err != nil {
-					t.Errorf("line skeep %d failed %v", i, err)
-				}
+				assert.NoError(t, err, "test #%d", i)
 			}
 			line, err := tt.readLine()
-			if line != test.want {
-				t.Errorf("line resulting %d failed %s != %s", i, line, test.want)
-			}
-			if err != test.err {
-				t.Errorf("error resulting %d failed %v != %v", i, err, test.err)
-			}
+			assert.Equal(t, test.want, line, "test #%d", i)
+			assert.NoError(t, err, "test #%d", i)
 		}
 	}
 }
@@ -87,7 +81,6 @@ func TestInput(t *testing.T) {
 var renderTests = []struct {
 	input string
 	want  string
-	err   error
 }{
 	{
 		input: "hello\n",
@@ -105,12 +98,8 @@ func TestRender(t *testing.T) {
 			screen := NewMockTerminal(test.input, j)
 			tt := New(screen, "> ")
 			_, err := tt.readLine()
-			if err != test.err {
-				t.Errorf("error resulting %d failed %v != %v", i, err, test.err)
-			}
-			if screen.output.String() != test.want {
-				t.Errorf("line resulting %d failed %s != %s", i, screen.output.String(), test.want)
-			}
+			assert.Equal(t, test.want, screen.output.String(), "test #%d", i)
+			assert.NoError(t, err, "test #%d", i)
 		}
 	}
 }
