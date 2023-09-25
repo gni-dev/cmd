@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gni.dev/cmd/internal/dbg"
+	"gni.dev/cmd/internal/dbg/proc"
 )
 
 type LLDB struct {
@@ -19,6 +20,7 @@ type LLDB struct {
 	tmpDir     string
 	c          *conn
 	connCloser io.Closer
+	sym        proc.SymTable
 }
 
 func LaunchServer() (dbg.Debugger, error) {
@@ -98,10 +100,7 @@ func (l *LLDB) readImage(filename string) error {
 	if err != nil {
 		return err
 	}
-
-	dwarf.Reader().Next()
-
-	return nil
+	return l.sym.LoadImage(dwarf)
 }
 
 func tryConnect(network, address string) (conn net.Conn, err error) {
