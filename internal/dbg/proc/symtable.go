@@ -18,15 +18,16 @@ type compileUnitRange struct {
 	cu            *compileUnit
 }
 
-type AmbiguousErr struct {
+type ErrAmbiguous struct {
 	Location   string
 	Candidates []string
 }
 
-func (a *AmbiguousErr) Error() string {
+func (a *ErrAmbiguous) Error() string {
 	return fmt.Sprintf("Location %q ambiguous: %s", a.Location, strings.Join(a.Candidates, ", "))
 }
 
+// LoadImage loads the debug information from the given DWARF data.
 func (s *SymTable) LoadImage(d *dwarf.Data) error {
 	r := d.Reader()
 	for {
@@ -77,27 +78,27 @@ func (s *SymTable) LoadImage(d *dwarf.Data) error {
 	return nil
 }
 
-func (s *SymTable) LineToPC(file string, line int) (uint64, error) {
-	if len(file) > 0 && file[0] != filepath.Separator {
-		file = string(filepath.Separator) + file
+// LineToPC returns the PC for the given file and line.
+func (s *SymTable) LineToPC(file string, line int) (uint64, string, error) {
+	normalized := filepath.Join(string(filepath.Separator), file)
+	files, ok := s.fileIdx[normalized]
+	if !ok {
+		return 0, "", fmt.Errorf("file %s not found", file)
 	}
 
-	files, ok := s.fileIdx[file]
-	if !ok {
-		return 0, fmt.Errorf("file %s not found", file)
-	}
 	if len(files) > 1 {
 		var candidates []string
 		for _, f := range files {
 			candidates = append(candidates, f.name)
 		}
-		return 0, &AmbiguousErr{
+		return 0, "", &ErrAmbiguous{
 			Location:   file,
 			Candidates: candidates,
 		}
 	}
+
 	if pc, ok := files[0].lines[line]; ok {
-		return pc, nil
+		return pc, files[0].name, nil
 	}
-	return 0, fmt.Errorf("location %s:%d not found", file, line)
+	return 0, "", fmt.Errorf("location %s:%d not found", file, line)
 }

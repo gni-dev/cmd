@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/hex"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"strconv"
@@ -59,7 +60,7 @@ func (c *conn) handshake() error {
 	if err := c.disableACK(); err != nil {
 		return err
 	}
-	stub, err := c.getFeatures("xmlRegisters=i386;multiprocess+")
+	stub, err := c.qSupported("xmlRegisters=i386;multiprocess+")
 	if err != nil {
 		return err
 	}
@@ -77,7 +78,7 @@ func (c *conn) disableACK() error {
 	return err
 }
 
-func (c *conn) getFeatures(features string) (map[string]string, error) {
+func (c *conn) qSupported(features string) (map[string]string, error) {
 	resp, err := c.exec("qSupported:" + features)
 	if err != nil {
 		return nil, err
@@ -121,6 +122,28 @@ func (c *conn) qXfer(kind, annex string) ([]byte, error) {
 	}
 }
 
+type targetReg struct {
+	Name string `xml:"name,attr"`
+}
+
+type targetDesc struct {
+	Arch string      `xml:"architecture"`
+	Regs []targetReg `xml:"feature>reg"`
+}
+
+func (c *conn) readTargetFeatures() (targetDesc, error) {
+	resp, err := c.qXfer("features", "target.xml")
+	if err != nil {
+		return targetDesc{}, err
+	}
+
+	var desc targetDesc
+	if err := xml.Unmarshal(resp, &desc); err != nil {
+		return targetDesc{}, nil
+	}
+	return desc, nil
+}
+
 func (c *conn) getProcessInfo() (processInfo, error) {
 	resp, err := c.exec("qProcessInfo")
 	if err != nil {
@@ -135,6 +158,16 @@ func (c *conn) getProcessInfoPID(pid int) (processInfo, error) {
 		return processInfo{}, err
 	}
 	return parseProcessInfo(resp, 10), nil
+}
+
+func (c *conn) insertBreakpoint(addr uint64, kind int) error {
+	_, err := c.exec(fmt.Sprintf("Z0,%x,%x", addr, kind))
+	return err
+}
+
+func (c *conn) removeBreakpoint(addr uint64, kind int) error {
+	_, err := c.exec(fmt.Sprintf("z0,%x,%x", addr, kind))
+	return err
 }
 
 func (c *conn) stopReply(resp []byte) (stopPacket, error) {

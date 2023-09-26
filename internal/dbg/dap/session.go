@@ -24,6 +24,7 @@ func NewSession(rw io.ReadWriter) *Session {
 		"disconnect":              s.onDisconnect,
 		"launch":                  s.onLaunch,
 		"setBreakpoints":          s.onSetBreakpoints,
+		"configurationDone":       s.onConfigurationDone,
 		"setExceptionBreakpoints": s.setExceptionBreakpoints,
 		"threads":                 s.onThreads,
 		"pause":                   s.onPause,
@@ -60,11 +61,16 @@ func (s *Session) Serve() error {
 }
 
 func (s *Session) onInitialize(req *request) {
-	resp := map[string]interface{}{}
+	resp := map[string]any{
+		"supportsConfigurationDoneRequest": true,
+	}
 	s.reply(newResponse(req, resp))
 }
 
 func (s *Session) onDisconnect(req *request) {
+	if s.d != nil {
+		s.d.Detach()
+	}
 	s.reply(newResponse(req, nil))
 }
 
@@ -96,17 +102,65 @@ func (s *Session) onLaunch(req *request) {
 	s.reply(newResponse(req, nil))
 }
 
+type breakpoint struct {
+	ID       int    `json:"id,omitempty"`
+	Verified bool   `json:"verified"`
+	Message  string `json:"message,omitempty"`
+	Source   string `json:"source,omitempty"`
+	Line     int    `json:"line,omitempty"`
+}
+
 func (s *Session) onSetBreakpoints(req *request) {
+	if s.d == nil {
+		s.replyErr(req, setBreakpointsErr, "debugger not running", true)
+		return
+	}
+
+	args := struct {
+		Source struct {
+			Path string `json:"path"`
+		} `json:"source"`
+		Breakpoints []struct {
+			Line int `json:"line"`
+		} `json:"breakpoints"`
+	}{}
+	err := json.Unmarshal(req.Arguments, &args)
+	if err != nil {
+		s.replyErr(req, parseErr, err.Error(), false)
+		return
+	}
+
+	var got []breakpoint
+	for _, inBp := range args.Breakpoints {
+		bp := &dbg.Breakpoint{File: args.Source.Path, Line: inBp.Line}
+
+		bp, err := s.d.SetBreakpoint(bp)
+		resp := breakpoint{}
+		if err != nil {
+			resp.Verified = false
+			resp.Message = err.Error()
+		} else {
+			resp.Verified = true
+			resp.ID = bp.ID
+			resp.Source = bp.File
+			resp.Line = bp.Line
+		}
+		got = append(got, resp)
+	}
+	s.reply(newResponse(req, map[string]any{"breakpoints": got}))
+}
+
+func (s *Session) onConfigurationDone(req *request) {
 	s.reply(newResponse(req, nil))
 }
 
 func (s *Session) setExceptionBreakpoints(req *request) {
-	s.reply(newResponse(req, nil))
+	s.reply(newResponse(req, nil)) // just ignore
 }
 
 func (s *Session) onThreads(req *request) {
-	resp := map[string]interface{}{
-		"threads": []map[string]interface{}{
+	resp := map[string]any{
+		"threads": []map[string]any{
 			{
 				"id":   1,
 				"name": "main",
@@ -118,7 +172,7 @@ func (s *Session) onThreads(req *request) {
 
 func (s *Session) onPause(req *request) {
 	s.reply(newResponse(req, nil))
-	s.reply(newEvent("stopped", map[string]interface{}{
+	s.reply(newEvent("stopped", map[string]any{
 		"reason":            "pause",
 		"threadId":          1,
 		"allThreadsStopped": true,
@@ -126,12 +180,12 @@ func (s *Session) onPause(req *request) {
 }
 
 func (s *Session) onStackTrace(req *request) {
-	resp := map[string]interface{}{
-		"stackFrames": []map[string]interface{}{
+	resp := map[string]any{
+		"stackFrames": []map[string]any{
 			{
 				"id":     1,
 				"name":   "main",
-				"source": map[string]interface{}{"name": "main.go", "path": "/home/hiot/test/main.go"},
+				"source": map[string]any{"name": "main.go", "path": "./main.go"},
 				"line":   10,
 				"column": 0,
 			},
@@ -141,8 +195,8 @@ func (s *Session) onStackTrace(req *request) {
 }
 
 func (s *Session) onScopes(req *request) {
-	resp := map[string]interface{}{
-		"scopes": []map[string]interface{}{
+	resp := map[string]any{
+		"scopes": []map[string]any{
 			{
 				"name":               "Local",
 				"variablesReference": 1000,
@@ -154,8 +208,8 @@ func (s *Session) onScopes(req *request) {
 }
 
 func (s *Session) onVariables(req *request) {
-	resp := map[string]interface{}{
-		"variables": []map[string]interface{}{
+	resp := map[string]any{
+		"variables": []map[string]any{
 			{
 				"name":               "a",
 				"value":              "1",

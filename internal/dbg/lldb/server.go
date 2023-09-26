@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -21,6 +22,10 @@ type LLDB struct {
 	c          *conn
 	connCloser io.Closer
 	sym        proc.SymTable
+	arch       string
+	bpKind     int
+	bpCnt      int
+	bps        map[int]*dbg.Breakpoint
 }
 
 func LaunchServer() (dbg.Debugger, error) {
@@ -66,6 +71,9 @@ func (l *LLDB) Run(program string, args []string) error {
 	if _, err := l.c.run(program, args); err != nil {
 		return err
 	}
+	if err := l.fetchFutures(); err != nil {
+		return err
+	}
 	pi, err := l.c.getProcessInfo()
 	if err != nil {
 		return err
@@ -82,6 +90,30 @@ func (l *LLDB) Detach() error {
 		return err
 	}
 	return nil
+}
+
+func (l *LLDB) SetBreakpoint(bp *dbg.Breakpoint) (*dbg.Breakpoint, error) {
+	addr, filePath, err := l.sym.LineToPC(bp.File, bp.Line)
+	if err != nil {
+		return nil, err
+	}
+	if err := l.c.insertBreakpoint(addr, l.bpKind); err != nil {
+		return nil, err
+	}
+	l.bpCnt++
+	newBp := &dbg.Breakpoint{
+		ID:   l.bpCnt,
+		Func: bp.Func,
+		File: filePath,
+		Line: bp.Line,
+	}
+	l.bps[newBp.ID] = newBp
+	return newBp, nil
+}
+
+func (l *LLDB) Continue() error {
+	_, err := l.c.exec("c")
+	return err
 }
 
 func (l *LLDB) readImage(filename string) error {
@@ -101,6 +133,24 @@ func (l *LLDB) readImage(filename string) error {
 		return err
 	}
 	return l.sym.LoadImage(dwarf)
+}
+
+func (l *LLDB) fetchFutures() error {
+	target, err := l.c.readTargetFeatures()
+	if err != nil {
+		return err
+	}
+	switch {
+	case strings.Contains(target.Arch, "x86_64"):
+		l.arch = dbg.ArchAMD64
+		l.bpKind = 1
+	case strings.Contains(target.Arch, "aarch64"):
+		l.arch = dbg.ArchARM64
+		l.bpKind = 4
+	default:
+		return fmt.Errorf("unsupported architecture: %s", target.Arch)
+	}
+	return nil
 }
 
 func tryConnect(network, address string) (conn net.Conn, err error) {

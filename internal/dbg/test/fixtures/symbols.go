@@ -1,6 +1,11 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+
+	"gni.dev/cmd/internal/dbg/test/fixtures/dup1"
+	"gni.dev/cmd/internal/dbg/test/fixtures/dup2"
+)
 
 type Struct1 struct {
 	a int
@@ -27,4 +32,7 @@ func main() {
 
 	s := &Struct1{a: 1, b: []int{1, 2, 3}, c: map[string]int{"a": 1, "b": 2}}
 	s.Method1()
+
+	dup1.Foo()
+	dup2.Foo()
 }

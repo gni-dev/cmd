@@ -26,9 +26,16 @@ func TestSymbols(t *testing.T) {
 
 	assert.NoError(t, sym.LoadImage(dwarf))
 
-	_, err = sym.LineToPC("symbols.go", 28)
+	_, _, err = sym.LineToPC("symbols.go", 33)
 	assert.NoError(t, err)
 
-	_, err = sym.LineToPC("symbols.go", 24)
-	assert.Error(t, err)
+	_, _, err = sym.LineToPC("//symbols.go", 34)
+	assert.NoError(t, err)
+
+	_, _, err = sym.LineToPC("symbols.go", 9)
+	assert.ErrorContains(t, err, "not found")
+
+	_, _, err = sym.LineToPC("foo.go", 4)
+	var errAmbiguous *ErrAmbiguous
+	assert.ErrorAs(t, err, &errAmbiguous)
 }
